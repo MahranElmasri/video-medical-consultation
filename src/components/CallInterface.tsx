@@ -421,7 +421,7 @@ export const CallInterface = ({
       </div>
 
       {/* Local Video (Picture-in-Picture) */}
-      <div className="absolute top-4 right-4 w-[120px] h-[160px] tablet:w-[160px] tablet:h-[200px] bg-neutral-900 rounded-md overflow-hidden shadow-modal border-2 border-white">
+      <div className="absolute top-4 right-4 w-[100px] h-[133px] tablet:w-[140px] tablet:h-[187px] desktop:w-[160px] desktop:h-[213px] bg-neutral-900 rounded-md overflow-hidden shadow-modal border-2 border-white">
         {localStream ? (
           <>
             <video
@@ -429,10 +429,10 @@ export const CallInterface = ({
               autoPlay
               playsInline
               muted
-              className="w-full h-full object-cover mirror"
+              className="w-full h-full object-contain mirror"
             />
             {/* Local Audio Level Indicator */}
-            <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm px-2 py-1 rounded-sm">
+            <div className="absolute bottom-1 left-1 bg-black/60 backdrop-blur-sm px-1.5 py-0.5 rounded-sm">
               <AudioLevelIndicator level={localAudioLevel} isLocal={true} />
             </div>
           </>
@@ -444,38 +444,55 @@ export const CallInterface = ({
       </div>
 
       {/* Privacy Indicator (Top Left) */}
-      <div className="absolute top-4 left-4 flex flex-col gap-2">
-        <div className="bg-success/90 backdrop-blur-sm px-3 py-2 rounded-sm flex items-center gap-2">
-          <Lock className="w-4 h-4 text-white" />
-          <span className="text-small text-white font-medium">Encrypted</span>
+      <div className="absolute top-2 left-2 tablet:top-4 tablet:left-4 flex flex-col gap-1.5 tablet:gap-2 max-w-[calc(100vw-120px)] tablet:max-w-none">
+        <div className="bg-success/90 backdrop-blur-sm px-2 py-1.5 tablet:px-3 tablet:py-2 rounded-sm flex items-center gap-1.5 tablet:gap-2">
+          <Lock className="w-3 h-3 tablet:w-4 tablet:h-4 text-white flex-shrink-0" />
+          <span className="text-xs tablet:text-small text-white font-medium">Encrypted</span>
         </div>
 
         {/* Patient Location - Only visible to doctor */}
         {isDoctor && remoteLocation && (
-          <div className="bg-primary-500/90 backdrop-blur-sm px-3 py-2 rounded-sm flex items-center gap-2">
-            <MapPin className="w-4 h-4 text-white" />
-            <div className="flex flex-col">
-              <span className="text-xs text-white/80">Patient Location</span>
-              <span className="text-small text-white font-medium">{formatLocation(remoteLocation)}</span>
+          <div className="bg-primary-500/90 backdrop-blur-sm px-2 py-1.5 tablet:px-3 tablet:py-2 rounded-sm flex items-center gap-1.5 tablet:gap-2">
+            <MapPin className="w-3 h-3 tablet:w-4 tablet:h-4 text-white flex-shrink-0" />
+            <div className="flex flex-col min-w-0">
+              <span className="text-xxs tablet:text-xs text-white/80">Patient Location</span>
+              <span className="text-xs tablet:text-small text-white font-medium truncate">{formatLocation(remoteLocation)}</span>
             </div>
           </div>
         )}
 
         {/* Test Mode Indicator */}
         {shouldUseSyntheticVideo() && (
-          <div className="bg-warning/90 backdrop-blur-sm px-3 py-2 rounded-sm flex items-center gap-2">
-            <Video className="w-4 h-4 text-white" />
-            <span className="text-small text-white font-medium">TEST MODE</span>
+          <div className="bg-warning/90 backdrop-blur-sm px-2 py-1.5 tablet:px-3 tablet:py-2 rounded-sm flex items-center gap-1.5 tablet:gap-2">
+            <Video className="w-3 h-3 tablet:w-4 tablet:h-4 text-white flex-shrink-0" />
+            <span className="text-xs tablet:text-small text-white font-medium">TEST MODE</span>
           </div>
         )}
       </div>
 
       {/* Connection Quality Indicator (Top Center) */}
       {(iceConnectionState === 'checking' || connectionState !== 'connected') && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2">
-          <div className={`${quality.color}/90 backdrop-blur-sm px-3 py-2 rounded-md flex items-center gap-2`}>
-            <QualityIcon className="w-4 h-4 text-white" />
-            <span className="text-small text-white font-medium">{quality.text}</span>
+        <div className="absolute top-2 tablet:top-4 left-1/2 -translate-x-1/2 z-10">
+          <div className={`${quality.color}/90 backdrop-blur-sm px-2 py-1.5 tablet:px-3 tablet:py-2 rounded-md flex items-center gap-1.5 tablet:gap-2`}>
+            <QualityIcon className="w-3 h-3 tablet:w-4 tablet:h-4 text-white animate-pulse" />
+            <span className="text-xs tablet:text-small text-white font-medium">{quality.text}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Peer Disconnected/Reconnecting Indicator */}
+      {!remoteStream && connectionState === 'connected' && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-10 px-4">
+          <div className="bg-neutral-900/95 backdrop-blur-sm px-4 py-4 tablet:px-6 tablet:py-4 rounded-md text-center max-w-sm">
+            <div className="w-10 h-10 tablet:w-12 tablet:h-12 mx-auto mb-2 tablet:mb-3 rounded-full bg-warning/20 flex items-center justify-center">
+              <Wifi className="w-5 h-5 tablet:w-6 tablet:h-6 text-warning animate-pulse" />
+            </div>
+            <h3 className="text-small tablet:text-body text-white font-semibold mb-1 tablet:mb-2">
+              Waiting for Participant
+            </h3>
+            <p className="text-xs tablet:text-small text-neutral-300">
+              The other participant will appear here when they join or rejoin the call
+            </p>
           </div>
         </div>
       )}
@@ -526,46 +543,46 @@ export const CallInterface = ({
           (showControls || connectionState !== 'connected') ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
-        <div className="bg-white/95 backdrop-blur-md h-20 flex items-center justify-center gap-6 px-4">
+        <div className="bg-white/95 backdrop-blur-md h-16 tablet:h-20 flex items-center justify-center gap-3 tablet:gap-6 px-2 tablet:px-4">
           {/* Microphone Toggle */}
           <button
             onClick={handleToggleAudio}
-            className={`w-14 h-14 rounded-full flex items-center justify-center transition-all duration-fast
-              ${isAudioEnabled 
-                ? 'bg-neutral-100 hover:bg-neutral-200' 
-                : 'bg-error hover:bg-error/90'
+            className={`w-12 h-12 tablet:w-14 tablet:h-14 rounded-full flex items-center justify-center transition-all duration-fast
+              ${isAudioEnabled
+                ? 'bg-neutral-100 hover:bg-neutral-200 active:scale-95'
+                : 'bg-error hover:bg-error/90 active:scale-95'
               }`}
           >
             {isAudioEnabled ? (
-              <Mic className="w-6 h-6 text-neutral-900" />
+              <Mic className="w-5 h-5 tablet:w-6 tablet:h-6 text-neutral-900" />
             ) : (
-              <MicOff className="w-6 h-6 text-white" />
+              <MicOff className="w-5 h-5 tablet:w-6 tablet:h-6 text-white" />
             )}
           </button>
 
           {/* Video Toggle */}
           <button
             onClick={handleToggleVideo}
-            className={`w-14 h-14 rounded-full flex items-center justify-center transition-all duration-fast
-              ${isVideoEnabled 
-                ? 'bg-neutral-100 hover:bg-neutral-200' 
-                : 'bg-error hover:bg-error/90'
+            className={`w-12 h-12 tablet:w-14 tablet:h-14 rounded-full flex items-center justify-center transition-all duration-fast
+              ${isVideoEnabled
+                ? 'bg-neutral-100 hover:bg-neutral-200 active:scale-95'
+                : 'bg-error hover:bg-error/90 active:scale-95'
               }`}
           >
             {isVideoEnabled ? (
-              <Video className="w-6 h-6 text-neutral-900" />
+              <Video className="w-5 h-5 tablet:w-6 tablet:h-6 text-neutral-900" />
             ) : (
-              <VideoOff className="w-6 h-6 text-white" />
+              <VideoOff className="w-5 h-5 tablet:w-6 tablet:h-6 text-white" />
             )}
           </button>
 
-          {/* Screen Share Toggle */}
+          {/* Screen Share Toggle - Hide on small mobile */}
           <button
             onClick={handleScreenShare}
-            className={`w-14 h-14 rounded-full flex items-center justify-center transition-all duration-fast
-              ${isScreenSharing 
-                ? 'bg-primary hover:bg-primary/90' 
-                : 'bg-neutral-100 hover:bg-neutral-200'
+            className={`w-12 h-12 tablet:w-14 tablet:h-14 rounded-full flex items-center justify-center transition-all duration-fast hidden tablet:flex
+              ${isScreenSharing
+                ? 'bg-primary hover:bg-primary/90 active:scale-95'
+                : 'bg-neutral-100 hover:bg-neutral-200 active:scale-95'
               }`}
           >
             {isScreenSharing ? (
@@ -578,9 +595,9 @@ export const CallInterface = ({
           {/* End Call */}
           <button
             onClick={handleEndCall}
-            className="w-14 h-14 rounded-full bg-error hover:bg-error/90 flex items-center justify-center transition-all duration-fast"
+            className="w-12 h-12 tablet:w-14 tablet:h-14 rounded-full bg-error hover:bg-error/90 active:scale-95 flex items-center justify-center transition-all duration-fast"
           >
-            <PhoneOff className="w-6 h-6 text-white" />
+            <PhoneOff className="w-5 h-5 tablet:w-6 tablet:h-6 text-white" />
           </button>
         </div>
       </div>

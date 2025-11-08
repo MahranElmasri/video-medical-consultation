@@ -32,7 +32,7 @@ export const useWebRTC = (roomId: string, userId: string) => {
   });
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [remoteLocation, setRemoteLocation] = useState<LocationInfo | null>(null);
-  
+
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const channel = useRef<any>(null);
   const pendingCandidates = useRef<RTCIceCandidate[]>([]);
@@ -47,6 +47,8 @@ export const useWebRTC = (roomId: string, userId: string) => {
   const reconnectAttempts = useRef<number>(0);
   const reconnectTimeout = useRef<NodeJS.Timeout | null>(null);
   const maxReconnectAttempts = 3;
+  const remotePeerId = useRef<string | null>(null);
+  const disconnectTimeout = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize peer connection with STUN/TURN servers for reliable NAT traversal
   const createPeerConnection = useCallback((): RTCPeerConnection => {
@@ -138,6 +140,27 @@ export const useWebRTC = (roomId: string, userId: string) => {
             }
           }, 3000); // Wait 3 seconds before intervening
         }
+
+        // Start a timer to clear remote stream if peer doesn't return
+        if (!disconnectTimeout.current) {
+          disconnectTimeout.current = setTimeout(() => {
+            if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+              console.warn('[useWebRTC] ⚠️ Peer disconnected for too long, clearing remote stream');
+              console.warn('[useWebRTC] Waiting for peer to rejoin...');
+              setRemoteStream(null);
+              remoteStreamRef.current = null;
+              receivedTracks.current.clear();
+              remotePeerId.current = null; // Allow new peer to connect
+            }
+          }, 10000); // Clear after 10 seconds of disconnect
+        }
+      }
+
+      // Clear disconnect timeout when connection is restored
+      if (pc.connectionState === 'connected' && disconnectTimeout.current) {
+        console.log('[useWebRTC] Connection restored, clearing disconnect timeout');
+        clearTimeout(disconnectTimeout.current);
+        disconnectTimeout.current = null;
       }
     };
 
@@ -780,6 +803,57 @@ export const useWebRTC = (roomId: string, userId: string) => {
     }
   }, [connectionState, monitorConnectionQuality]);
 
+  // Reset peer connection when peer disconnects/rejoins
+  const resetPeerConnection = useCallback(() => {
+    console.log('[useWebRTC] === RESETTING PEER CONNECTION ===');
+
+    // Clear remote stream
+    setRemoteStream(null);
+    remoteStreamRef.current = null;
+    receivedTracks.current.clear();
+
+    // Clear pending candidates
+    pendingCandidates.current = [];
+
+    // Close existing peer connection
+    if (peerConnection.current) {
+      console.log('[useWebRTC] Closing existing peer connection');
+      peerConnection.current.close();
+      peerConnection.current = null;
+    }
+
+    // Reset state flags
+    makingOffer.current = false;
+    ignoreOffer.current = false;
+    reconnectAttempts.current = 0;
+
+    // Clear reconnect timeout
+    if (reconnectTimeout.current) {
+      clearTimeout(reconnectTimeout.current);
+      reconnectTimeout.current = null;
+    }
+
+    // Clear disconnect timeout
+    if (disconnectTimeout.current) {
+      clearTimeout(disconnectTimeout.current);
+      disconnectTimeout.current = null;
+    }
+
+    // Create fresh peer connection if we have a local stream
+    if (localStream) {
+      console.log('[useWebRTC] Creating fresh peer connection with local stream');
+      peerConnection.current = createPeerConnection();
+
+      // Re-add local tracks to new connection
+      localStream.getTracks().forEach((track) => {
+        console.log('[useWebRTC] Re-adding track to new connection:', track.kind);
+        peerConnection.current!.addTrack(track, localStream);
+      });
+    }
+
+    console.log('[useWebRTC] Peer connection reset complete');
+  }, [localStream, createPeerConnection]);
+
   // Send location info to remote peer
   const sendLocation = useCallback((locationInfo: LocationInfo) => {
     if (!channel.current) {
@@ -892,6 +966,28 @@ export const useWebRTC = (roomId: string, userId: string) => {
 
         console.log('[useWebRTC] Received signal:', payload.type, 'from:', payload.from);
 
+        // Detect if this is a new/different peer or a peer rejoining
+        if (payload.type === 'ready' || payload.type === 'offer') {
+          if (remotePeerId.current && remotePeerId.current !== payload.from) {
+            console.log('[useWebRTC] ⚠️ Different peer detected! Previous:', remotePeerId.current, 'New:', payload.from);
+            console.log('[useWebRTC] Resetting connection for new peer');
+            resetPeerConnection();
+          } else if (remotePeerId.current === payload.from && payload.type === 'ready') {
+            // Same peer sent "ready" again - they likely refreshed/rejoined
+            console.log('[useWebRTC] ⚠️ Same peer rejoined! Resetting connection');
+            resetPeerConnection();
+          }
+
+          // Update remote peer ID
+          remotePeerId.current = payload.from;
+
+          // Clear disconnect timeout since peer is active
+          if (disconnectTimeout.current) {
+            clearTimeout(disconnectTimeout.current);
+            disconnectTimeout.current = null;
+          }
+        }
+
         switch (payload.type) {
           case 'offer':
             console.log('[useWebRTC] Calling handleOffer');
@@ -943,7 +1039,7 @@ export const useWebRTC = (roomId: string, userId: string) => {
         channel.current = null;
       }
     };
-  }, [roomId, userId, handleOffer, handleAnswer, handleIceCandidate, createOffer]); // Include handlers so channel uses latest versions
+  }, [roomId, userId, handleOffer, handleAnswer, handleIceCandidate, createOffer, resetPeerConnection]); // Include handlers so channel uses latest versions
 
   return {
     localStream,

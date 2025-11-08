@@ -1,9 +1,11 @@
+import { memo } from 'react';
+
 interface AudioLevelIndicatorProps {
   level: number; // 0-100
   isLocal?: boolean; // Different styling for local vs remote
 }
 
-export const AudioLevelIndicator = ({ level, isLocal = false }: AudioLevelIndicatorProps) => {
+const AudioLevelIndicatorComponent = ({ level, isLocal = false }: AudioLevelIndicatorProps) => {
   // Calculate how many bars should be lit based on level
   const numBars = 8;
   const activeBars = Math.ceil((level / 100) * numBars);
@@ -40,3 +42,9 @@ export const AudioLevelIndicator = ({ level, isLocal = false }: AudioLevelIndica
     </div>
   );
 };
+
+// Memoize to prevent unnecessary re-renders
+export const AudioLevelIndicator = memo(AudioLevelIndicatorComponent, (prev, next) => {
+  // Only re-render if level changes by more than 5 points (reduce flicker)
+  return Math.abs(prev.level - next.level) < 5 && prev.isLocal === next.isLocal;
+});

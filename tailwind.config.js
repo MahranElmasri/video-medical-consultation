@@ -55,6 +55,8 @@ module.exports = {
         'body': ['16px', { lineHeight: '1.5' }],
         'small': ['14px', { lineHeight: '1.5' }],
         'caption': ['12px', { lineHeight: '1.4', letterSpacing: '0.01em' }],
+        'xs': ['12px', { lineHeight: '1.4' }],
+        'xxs': ['10px', { lineHeight: '1.3' }],
       },
       spacing: {
         '2': '8px',

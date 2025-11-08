@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 
 /**
  * Custom hook to measure audio level from a MediaStream
@@ -10,6 +10,7 @@ export const useAudioLevel = (stream: MediaStream | null): number => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const dataArrayRef = useRef<Uint8Array | null>(null);
+  const streamIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!stream) {
@@ -17,6 +18,13 @@ export const useAudioLevel = (stream: MediaStream | null): number => {
       setAudioLevel(0);
       return;
     }
+
+    // Skip if same stream
+    if (stream.id === streamIdRef.current) {
+      return;
+    }
+
+    streamIdRef.current = stream.id;
 
     const audioTracks = stream.getAudioTracks();
     if (audioTracks.length === 0) {
