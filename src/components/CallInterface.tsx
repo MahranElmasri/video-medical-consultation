@@ -394,14 +394,14 @@ export const CallInterface = ({
   return (
     <div className="relative w-full h-screen bg-neutral-900 overflow-hidden">
       {/* Remote Video (Full Screen) */}
-      <div className="absolute inset-0">
+      <div className="absolute inset-0 bg-neutral-900">
         {remoteStream ? (
           <>
             <video
               ref={remoteVideoRef}
               autoPlay
               playsInline
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain"
             />
             {/* Remote Audio Level Indicator */}
             <div className="absolute bottom-24 left-4 bg-black/60 backdrop-blur-sm px-3 py-2 rounded-md">

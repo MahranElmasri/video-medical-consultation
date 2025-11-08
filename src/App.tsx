@@ -6,6 +6,7 @@ import { useWebRTC } from './hooks/useWebRTC';
 import { supabase } from './lib/supabase';
 import { detectBrowser, getBrowserInstructions } from './utils/permissionCheck';
 import { getUserLocation } from './utils/geolocation';
+import { getBrowserInfo, getMobilePermissionHelp } from './utils/browserCompatibility';
 import './index.css';
 
 type AppState = 'landing' | 'waiting' | 'call';
@@ -106,24 +107,30 @@ function App() {
     } catch (error) {
       console.error('Failed to access media devices:', error);
 
-      // Provide user-friendly error message
-      if (error instanceof DOMException) {
+      // Get mobile-specific error messages
+      const browserInfo = getBrowserInfo();
+      let errorMessage = '';
+
+      if (error instanceof Error) {
+        // Use the detailed error message from our mobile compatibility layer
+        errorMessage = error.message;
+      } else if (error instanceof DOMException) {
         if (error.name === 'NotAllowedError') {
-          setPermissionError(
-            'Camera and microphone access denied. Please enable permissions in your browser settings and try again.'
-          );
+          errorMessage = browserInfo.isMobile
+            ? 'Camera and microphone access denied. Please close any overlays (chat bubbles) from other apps, then enable permissions in your browser settings.'
+            : 'Camera and microphone access denied. Please enable permissions in your browser settings and try again.';
         } else if (error.name === 'NotFoundError') {
-          setPermissionError(
-            'No camera or microphone found. Please connect a device and try again.'
-          );
+          errorMessage = 'No camera or microphone found. Please connect a device and try again.';
+        } else if (error.name === 'NotReadableError') {
+          errorMessage = 'Camera or microphone is already in use by another app. Please close other apps and try again.';
         } else {
-          setPermissionError(
-            'Failed to access camera or microphone. Please check your device and try again.'
-          );
+          errorMessage = 'Failed to access camera or microphone. Please check your device and try again.';
         }
       } else {
-        setPermissionError('An unexpected error occurred. Please try again.');
+        errorMessage = 'An unexpected error occurred. Please try again.';
       }
+
+      setPermissionError(errorMessage);
     }
   };
 
@@ -203,63 +210,85 @@ function App() {
       )}
 
       {/* Permission Error Modal */}
-      {permissionError && (
-        <div className="fixed inset-0 bg-overlay flex items-center justify-center p-4 z-50">
-          <div className="bg-surface rounded-md shadow-modal p-8 max-w-lg w-full">
-            <h3 className="text-subtitle text-neutral-900 font-semibold mb-4">
-              Camera/Microphone Access Required
-            </h3>
-            <p className="text-body text-neutral-700 mb-4">
-              {permissionError}
-            </p>
+      {permissionError && (() => {
+        const browserInfo = getBrowserInfo();
+        const mobileHelp = getMobilePermissionHelp();
+        const instructions = browserInfo.isMobile
+          ? mobileHelp.steps
+          : getBrowserInstructions(detectBrowser());
+        const helpTitle = browserInfo.isMobile ? mobileHelp.title : `How to enable permissions in ${detectBrowser()}`;
 
-            {/* Browser-specific instructions */}
-            <div className="bg-primary-50 border border-primary-100 rounded-sm p-4 mb-6">
-              <p className="text-small font-semibold text-neutral-900 mb-2">
-                How to enable permissions in {detectBrowser()}:
+        return (
+          <div className="fixed inset-0 bg-overlay flex items-center justify-center p-4 z-50">
+            <div className="bg-surface rounded-md shadow-modal p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto">
+              <h3 className="text-subtitle text-neutral-900 font-semibold mb-4">
+                Camera/Microphone Access Required
+              </h3>
+              <p className="text-body text-neutral-700 mb-4">
+                {permissionError}
               </p>
-              <ol className="text-small text-neutral-700 space-y-2">
-                {getBrowserInstructions(detectBrowser()).map((instruction, index) => (
-                  <li key={index} className="flex gap-2">
-                    <span className="font-semibold">{index + 1}.</span>
-                    <span>{instruction}</span>
-                  </li>
-                ))}
-              </ol>
-            </div>
 
-            <div className="bg-neutral-50 border border-neutral-200 rounded-sm p-3 mb-6">
-              <p className="text-xs text-neutral-600">
-                <strong>Note:</strong> If you don't see a permission prompt, your browser may have already blocked access.
-                Look for a camera icon with an "X" or slash through it in the address bar.
-              </p>
-            </div>
+              {/* Browser/Mobile-specific instructions */}
+              <div className="bg-primary-50 border border-primary-100 rounded-sm p-4 mb-4">
+                <p className="text-small font-semibold text-neutral-900 mb-2">
+                  {helpTitle}
+                </p>
+                <ol className="text-small text-neutral-700 space-y-2">
+                  {instructions.map((instruction, index) => (
+                    <li key={index} className="flex gap-2">
+                      <span className="font-semibold">{index + 1}.</span>
+                      <span>{instruction}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
 
-            <div className="flex gap-4">
-              <button
-                onClick={() => {
-                  setPermissionError(null);
-                  handleJoinCall(); // Retry joining
-                }}
-                className="flex-1 h-12 bg-primary-500 text-white rounded-sm font-semibold text-body
-                  hover:bg-primary-600 transition-colors duration-fast"
-              >
-                Retry
-              </button>
-              <button
-                onClick={() => {
-                  setPermissionError(null);
-                  setAppState('waiting');
-                }}
-                className="flex-1 h-12 bg-neutral-100 border-2 border-neutral-200 text-neutral-900 rounded-sm font-semibold text-body
-                  hover:bg-neutral-50 transition-colors duration-fast"
-              >
-                Cancel
-              </button>
+              {browserInfo.isMobile && (
+                <div className="bg-warning/10 border border-warning rounded-sm p-3 mb-4">
+                  <p className="text-xs text-neutral-900 font-semibold mb-1">
+                    Common Issue on Mobile:
+                  </p>
+                  <p className="text-xs text-neutral-700">
+                    If you see "This site can't ask for your permission", close any floating chat bubbles
+                    (Facebook Messenger, WhatsApp) or overlays from other apps, then try again.
+                  </p>
+                </div>
+              )}
+
+              <div className="bg-neutral-50 border border-neutral-200 rounded-sm p-3 mb-4">
+                <p className="text-xs text-neutral-600">
+                  <strong>Note:</strong> {browserInfo.isMobile
+                    ? 'Make sure you are accessing this page via HTTPS (secure connection) and not in private/incognito mode on some browsers.'
+                    : 'If you don\'t see a permission prompt, your browser may have already blocked access. Look for a camera icon with an "X" or slash through it in the address bar.'}
+                </p>
+              </div>
+
+              <div className="flex gap-4">
+                <button
+                  onClick={() => {
+                    setPermissionError(null);
+                    handleJoinCall(); // Retry joining
+                  }}
+                  className="flex-1 h-12 bg-primary-500 text-white rounded-sm font-semibold text-body
+                    hover:bg-primary-600 transition-colors duration-fast"
+                >
+                  Retry
+                </button>
+                <button
+                  onClick={() => {
+                    setPermissionError(null);
+                    setAppState('waiting');
+                  }}
+                  className="flex-1 h-12 bg-neutral-100 border-2 border-neutral-200 text-neutral-900 rounded-sm font-semibold text-body
+                    hover:bg-neutral-50 transition-colors duration-fast"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </>
   );
 }

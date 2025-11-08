@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { createSyntheticMediaStream, shouldUseSyntheticVideo } from '../utils/syntheticVideoStream';
 import type { LocationInfo } from '../utils/geolocation';
+import { requestMediaDevicesMobile, getBrowserInfo } from '../utils/browserCompatibility';
 
 export interface WebRTCMessage {
   type: 'offer' | 'answer' | 'ice-candidate' | 'ready' | 'leave' | 'location-info';
@@ -286,27 +287,10 @@ export const useWebRTC = (roomId: string, userId: string) => {
         stream = createSyntheticMediaStream(1280, 720);
         console.log('[useWebRTC] Synthetic stream created successfully');
       } else {
-        // Normal mode - use real camera
-        // Check if getUserMedia is supported
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          throw new Error('getUserMedia is not supported in this browser');
-        }
-        
-        const constraints = {
-          video: {
-            width: { ideal: 1280, max: 1920 },
-            height: { ideal: 720, max: 1080 },
-            frameRate: { ideal: 30, max: 30 },
-          },
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
-        };
-        
-        console.log('[useWebRTC] Requesting user media with constraints:', constraints);
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        // Normal mode - use real camera with mobile-optimized request
+        console.log('[useWebRTC] Requesting user media (mobile-optimized)...');
+        stream = await requestMediaDevicesMobile();
+        console.log('[useWebRTC] Media stream obtained via mobile-optimized request');
       }
 
       console.log('[useWebRTC] Media stream obtained successfully!');
