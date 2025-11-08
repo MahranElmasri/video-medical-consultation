@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import { createSyntheticMediaStream, shouldUseSyntheticVideo } from '../utils/syntheticVideoStream';
+import type { LocationInfo } from '../utils/geolocation';
 
 export interface WebRTCMessage {
-  type: 'offer' | 'answer' | 'ice-candidate' | 'ready' | 'leave';
+  type: 'offer' | 'answer' | 'ice-candidate' | 'ready' | 'leave' | 'location-info';
   data: any;
   from: string;
 }
@@ -29,6 +30,7 @@ export const useWebRTC = (roomId: string, userId: string) => {
     quality: 'connecting',
   });
   const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [remoteLocation, setRemoteLocation] = useState<LocationInfo | null>(null);
   
   const peerConnection = useRef<RTCPeerConnection | null>(null);
   const channel = useRef<any>(null);
@@ -794,6 +796,28 @@ export const useWebRTC = (roomId: string, userId: string) => {
     }
   }, [connectionState, monitorConnectionQuality]);
 
+  // Send location info to remote peer
+  const sendLocation = useCallback((locationInfo: LocationInfo) => {
+    if (!channel.current) {
+      console.warn('[useWebRTC] Cannot send location - channel not ready');
+      return;
+    }
+
+    console.log('[useWebRTC] Sending location info:', locationInfo);
+
+    const message: WebRTCMessage = {
+      type: 'location-info',
+      data: locationInfo,
+      from: userId,
+    };
+
+    channel.current.send({
+      type: 'broadcast',
+      event: 'webrtc-signal',
+      payload: message,
+    });
+  }, [userId]);
+
   // Cleanup function - ENHANCED with reconnection cleanup
   const cleanup = useCallback(() => {
     console.log('[useWebRTC] === CLEANUP ===');
@@ -909,6 +933,10 @@ export const useWebRTC = (roomId: string, userId: string) => {
               console.log('[useWebRTC] No peer connection yet');
             }
             break;
+          case 'location-info':
+            console.log('[useWebRTC] Received location info from peer:', payload.data);
+            setRemoteLocation(payload.data);
+            break;
         }
       })
       .subscribe((status) => {
@@ -940,12 +968,14 @@ export const useWebRTC = (roomId: string, userId: string) => {
     iceConnectionState,
     connectionQuality,
     isScreenSharing,
+    remoteLocation,
     startLocalStream,
     createOffer,
     toggleAudio,
     toggleVideo,
     startScreenShare,
     stopScreenShare,
+    sendLocation,
     cleanup,
   };
 };

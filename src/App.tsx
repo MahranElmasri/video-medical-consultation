@@ -4,6 +4,8 @@ import { WaitingRoom } from './components/WaitingRoom';
 import { CallInterface } from './components/CallInterface';
 import { useWebRTC } from './hooks/useWebRTC';
 import { supabase } from './lib/supabase';
+import { detectBrowser, getBrowserInstructions } from './utils/permissionCheck';
+import { getUserLocation } from './utils/geolocation';
 import './index.css';
 
 type AppState = 'landing' | 'waiting' | 'call';
@@ -28,12 +30,14 @@ function App() {
     iceConnectionState,
     connectionQuality,
     isScreenSharing,
+    remoteLocation,
     startLocalStream,
     createOffer,
     toggleAudio,
     toggleVideo,
     startScreenShare,
     stopScreenShare,
+    sendLocation,
     cleanup,
   } = useWebRTC(roomData?.roomId || '', userId);
 
@@ -79,11 +83,29 @@ function App() {
       // Move to call state
       setAppState('call');
 
+      // Get and send patient location (if patient is joining)
+      // Patients are identified by empty token
+      if (!roomData?.token) {
+        console.log('[App] Patient joining - getting location...');
+        try {
+          const location = await getUserLocation();
+          console.log('[App] Patient location obtained:', location);
+
+          // Send location to doctor after a short delay to ensure channel is ready
+          setTimeout(() => {
+            sendLocation(location);
+          }, 1000);
+        } catch (error) {
+          console.warn('[App] Failed to get patient location:', error);
+          // Continue anyway - location is optional
+        }
+      }
+
       // The signaling channel will handle offer/answer exchange automatically
       // via the "ready" signal mechanism - no need to manually call createOffer
     } catch (error) {
       console.error('Failed to access media devices:', error);
-      
+
       // Provide user-friendly error message
       if (error instanceof DOMException) {
         if (error.name === 'NotAllowedError') {
@@ -158,6 +180,7 @@ function App() {
           roomUrl={roomData.roomUrl}
           onCancel={handleCancel}
           onJoinCall={handleJoinCall}
+          isDoctor={!!roomData.token}
         />
       )}
 
@@ -169,6 +192,8 @@ function App() {
           iceConnectionState={iceConnectionState}
           connectionQuality={connectionQuality}
           isScreenSharing={isScreenSharing}
+          remoteLocation={remoteLocation}
+          isDoctor={!!roomData?.token}
           onToggleAudio={toggleAudio}
           onToggleVideo={toggleVideo}
           onStartScreenShare={startScreenShare}
@@ -180,13 +205,36 @@ function App() {
       {/* Permission Error Modal */}
       {permissionError && (
         <div className="fixed inset-0 bg-overlay flex items-center justify-center p-4 z-50">
-          <div className="bg-surface rounded-md shadow-modal p-8 max-w-md w-full">
+          <div className="bg-surface rounded-md shadow-modal p-8 max-w-lg w-full">
             <h3 className="text-subtitle text-neutral-900 font-semibold mb-4">
               Camera/Microphone Access Required
             </h3>
-            <p className="text-body text-neutral-700 mb-8">
+            <p className="text-body text-neutral-700 mb-4">
               {permissionError}
             </p>
+
+            {/* Browser-specific instructions */}
+            <div className="bg-primary-50 border border-primary-100 rounded-sm p-4 mb-6">
+              <p className="text-small font-semibold text-neutral-900 mb-2">
+                How to enable permissions in {detectBrowser()}:
+              </p>
+              <ol className="text-small text-neutral-700 space-y-2">
+                {getBrowserInstructions(detectBrowser()).map((instruction, index) => (
+                  <li key={index} className="flex gap-2">
+                    <span className="font-semibold">{index + 1}.</span>
+                    <span>{instruction}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            <div className="bg-neutral-50 border border-neutral-200 rounded-sm p-3 mb-6">
+              <p className="text-xs text-neutral-600">
+                <strong>Note:</strong> If you don't see a permission prompt, your browser may have already blocked access.
+                Look for a camera icon with an "X" or slash through it in the address bar.
+              </p>
+            </div>
+
             <div className="flex gap-4">
               <button
                 onClick={() => {

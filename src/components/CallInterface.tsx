@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Video, VideoOff, PhoneOff, Lock, Wifi, Monitor, MonitorOff } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, PhoneOff, Lock, Wifi, Monitor, MonitorOff, MapPin } from 'lucide-react';
 import { ConnectionQuality } from '../hooks/useWebRTC';
 import { shouldUseSyntheticVideo } from '../utils/syntheticVideoStream';
+import { useAudioLevel } from '../hooks/useAudioLevel';
+import { AudioLevelIndicator } from './AudioLevelIndicator';
+import { formatLocation, type LocationInfo } from '../utils/geolocation';
 
 interface CallInterfaceProps {
   localStream: MediaStream | null;
@@ -10,6 +13,8 @@ interface CallInterfaceProps {
   iceConnectionState: RTCIceConnectionState;
   connectionQuality: ConnectionQuality;
   isScreenSharing: boolean;
+  remoteLocation: LocationInfo | null;
+  isDoctor?: boolean;
   onToggleAudio: () => boolean;
   onToggleVideo: () => boolean;
   onStartScreenShare: () => Promise<boolean>;
@@ -24,6 +29,8 @@ export const CallInterface = ({
   iceConnectionState,
   connectionQuality,
   isScreenSharing,
+  remoteLocation,
+  isDoctor = false,
   onToggleAudio,
   onToggleVideo,
   onStartScreenShare,
@@ -34,10 +41,14 @@ export const CallInterface = ({
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [showControls, setShowControls] = useState(true);
   const [showEndCallConfirm, setShowEndCallConfirm] = useState(false);
-  
+
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout>();
+
+  // Audio level monitoring
+  const localAudioLevel = useAudioLevel(localStream);
+  const remoteAudioLevel = useAudioLevel(remoteStream);
 
   // Attach local stream to video element with ENHANCED playback reliability
   useEffect(() => {
@@ -385,12 +396,18 @@ export const CallInterface = ({
       {/* Remote Video (Full Screen) */}
       <div className="absolute inset-0">
         {remoteStream ? (
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            className="w-full h-full object-cover"
-          />
+          <>
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              className="w-full h-full object-cover"
+            />
+            {/* Remote Audio Level Indicator */}
+            <div className="absolute bottom-24 left-4 bg-black/60 backdrop-blur-sm px-3 py-2 rounded-md">
+              <AudioLevelIndicator level={remoteAudioLevel} isLocal={false} />
+            </div>
+          </>
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-neutral-800">
             <div className="text-center">
@@ -406,13 +423,19 @@ export const CallInterface = ({
       {/* Local Video (Picture-in-Picture) */}
       <div className="absolute top-4 right-4 w-[120px] h-[160px] tablet:w-[160px] tablet:h-[200px] bg-neutral-900 rounded-md overflow-hidden shadow-modal border-2 border-white">
         {localStream ? (
-          <video
-            ref={localVideoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover mirror"
-          />
+          <>
+            <video
+              ref={localVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover mirror"
+            />
+            {/* Local Audio Level Indicator */}
+            <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm px-2 py-1 rounded-sm">
+              <AudioLevelIndicator level={localAudioLevel} isLocal={true} />
+            </div>
+          </>
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-neutral-800">
             <VideoOff className="w-8 h-8 text-neutral-500" />
@@ -426,7 +449,18 @@ export const CallInterface = ({
           <Lock className="w-4 h-4 text-white" />
           <span className="text-small text-white font-medium">Encrypted</span>
         </div>
-        
+
+        {/* Patient Location - Only visible to doctor */}
+        {isDoctor && remoteLocation && (
+          <div className="bg-primary-500/90 backdrop-blur-sm px-3 py-2 rounded-sm flex items-center gap-2">
+            <MapPin className="w-4 h-4 text-white" />
+            <div className="flex flex-col">
+              <span className="text-xs text-white/80">Patient Location</span>
+              <span className="text-small text-white font-medium">{formatLocation(remoteLocation)}</span>
+            </div>
+          </div>
+        )}
+
         {/* Test Mode Indicator */}
         {shouldUseSyntheticVideo() && (
           <div className="bg-warning/90 backdrop-blur-sm px-3 py-2 rounded-sm flex items-center gap-2">
