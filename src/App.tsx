@@ -32,6 +32,7 @@ function App() {
     connectionQuality,
     isScreenSharing,
     remoteLocation,
+    drawingMessages,
     startLocalStream,
     createOffer,
     toggleAudio,
@@ -39,6 +40,7 @@ function App() {
     startScreenShare,
     stopScreenShare,
     sendLocation,
+    sendDrawingMessage,
     cleanup,
   } = useWebRTC(roomData?.roomId || '', userId);
 
@@ -201,10 +203,12 @@ function App() {
           isScreenSharing={isScreenSharing}
           remoteLocation={remoteLocation}
           isDoctor={!!roomData?.token}
+          drawingMessages={drawingMessages}
           onToggleAudio={toggleAudio}
           onToggleVideo={toggleVideo}
           onStartScreenShare={startScreenShare}
           onStopScreenShare={stopScreenShare}
+          onSendDrawingMessage={sendDrawingMessage}
           onEndCall={handleEndCall}
         />
       )}

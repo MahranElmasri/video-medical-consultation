@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { Mic, MicOff, Video, VideoOff, PhoneOff, Lock, Wifi, Monitor, MonitorOff, MapPin } from 'lucide-react';
+import { Mic, MicOff, Video, VideoOff, PhoneOff, Lock, Wifi, Monitor, MonitorOff, MapPin, Pencil } from 'lucide-react';
 import { ConnectionQuality } from '../hooks/useWebRTC';
 import { shouldUseSyntheticVideo } from '../utils/syntheticVideoStream';
 import { useAudioLevel } from '../hooks/useAudioLevel';
 import { AudioLevelIndicator } from './AudioLevelIndicator';
+import { DrawingCanvas } from './DrawingCanvas';
 import { formatLocation, type LocationInfo } from '../utils/geolocation';
 
 interface CallInterfaceProps {
@@ -15,10 +16,12 @@ interface CallInterfaceProps {
   isScreenSharing: boolean;
   remoteLocation: LocationInfo | null;
   isDoctor?: boolean;
+  drawingMessages: any[];
   onToggleAudio: () => boolean;
   onToggleVideo: () => boolean;
   onStartScreenShare: () => Promise<boolean>;
   onStopScreenShare: () => void;
+  onSendDrawingMessage: (message: any) => void;
   onEndCall: () => void;
 }
 
@@ -31,19 +34,25 @@ export const CallInterface = ({
   isScreenSharing,
   remoteLocation,
   isDoctor = false,
+  drawingMessages,
   onToggleAudio,
   onToggleVideo,
   onStartScreenShare,
   onStopScreenShare,
+  onSendDrawingMessage,
   onEndCall,
 }: CallInterfaceProps) => {
   const [isAudioEnabled, setIsAudioEnabled] = useState(true);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [showControls, setShowControls] = useState(true);
   const [showEndCallConfirm, setShowEndCallConfirm] = useState(false);
+  const [isDrawingEnabled, setIsDrawingEnabled] = useState(false);
+  const [showScreenShareTip, setShowScreenShareTip] = useState(false);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const localVideoMainRef = useRef<HTMLVideoElement>(null); // For showing local stream in main area during screen share
+  const remoteVideoPipRef = useRef<HTMLVideoElement>(null); // For showing remote stream in PiP during screen share
   const controlsTimeoutRef = useRef<NodeJS.Timeout>();
 
   // Audio level monitoring
@@ -53,6 +62,13 @@ export const CallInterface = ({
   // Attach local stream to video element with ENHANCED playback reliability
   useEffect(() => {
     const videoElement = localVideoRef.current;
+
+    // Skip if screen sharing is active (using different refs)
+    if (isScreenSharing && isDoctor) {
+      console.log('[CallInterface] Skipping local attach - screen sharing active');
+      return;
+    }
+
     if (!videoElement || !localStream) {
       console.log('[CallInterface] Skipping local attach - element or stream missing', {
         hasElement: !!videoElement,
@@ -164,11 +180,18 @@ export const CallInterface = ({
         videoElement.srcObject = null;
       }
     };
-  }, [localStream]);
+  }, [localStream, isScreenSharing, isDoctor]);
 
   // Attach remote stream to video element with ENHANCED playback reliability
   useEffect(() => {
     const videoElement = remoteVideoRef.current;
+
+    // Skip if doctor is screen sharing (remote stream shown in PiP with different ref)
+    if (isScreenSharing && isDoctor) {
+      console.log('[CallInterface] Skipping remote attach - screen sharing active');
+      return;
+    }
+
     if (!videoElement || !remoteStream) {
       console.log('[CallInterface] Skipping remote attach - element or stream missing', {
         hasElement: !!videoElement,
@@ -292,7 +315,43 @@ export const CallInterface = ({
         videoElement.srcObject = null;
       }
     };
-  }, [remoteStream]);
+  }, [remoteStream, isScreenSharing, isDoctor]);
+
+  // Attach local stream to main area video element (during screen share)
+  useEffect(() => {
+    const videoElement = localVideoMainRef.current;
+    if (!videoElement || !localStream || !isScreenSharing || !isDoctor) {
+      return;
+    }
+
+    console.log('[CallInterface] Attaching local stream to main area (screen share)');
+    videoElement.srcObject = localStream;
+    videoElement.play().catch(e => console.error('[CallInterface] Failed to play local main video:', e));
+
+    return () => {
+      if (videoElement) {
+        videoElement.srcObject = null;
+      }
+    };
+  }, [localStream, isScreenSharing, isDoctor]);
+
+  // Attach remote stream to PiP video element (during screen share)
+  useEffect(() => {
+    const videoElement = remoteVideoPipRef.current;
+    if (!videoElement || !remoteStream || !isScreenSharing || !isDoctor) {
+      return;
+    }
+
+    console.log('[CallInterface] Attaching remote stream to PiP (screen share)');
+    videoElement.srcObject = remoteStream;
+    videoElement.play().catch(e => console.error('[CallInterface] Failed to play remote PiP video:', e));
+
+    return () => {
+      if (videoElement) {
+        videoElement.srcObject = null;
+      }
+    };
+  }, [remoteStream, isScreenSharing, isDoctor]);
 
   // Monitor and recover from track ended events
   useEffect(() => {
@@ -358,8 +417,24 @@ export const CallInterface = ({
   const handleScreenShare = async () => {
     if (isScreenSharing) {
       onStopScreenShare();
+      setShowScreenShareTip(false);
     } else {
-      await onStartScreenShare();
+      const success = await onStartScreenShare();
+
+      // Refocus the call interface after screen sharing starts
+      // This prevents the browser from keeping focus on the shared tab
+      if (success) {
+        setTimeout(() => {
+          window.focus();
+          console.log('[CallInterface] Refocused call interface after screen share');
+        }, 500); // Small delay to ensure screen share is fully initialized
+
+        // Show helpful tip for 4 seconds
+        setShowScreenShareTip(true);
+        setTimeout(() => {
+          setShowScreenShareTip(false);
+        }, 4000);
+      }
     }
   };
 
@@ -393,9 +468,34 @@ export const CallInterface = ({
 
   return (
     <div className="relative w-full h-screen bg-neutral-900 overflow-hidden">
-      {/* Remote Video (Full Screen) */}
+      {/* Main Video Area - Shows remote stream (patient) OR doctor's shared screen */}
       <div className="absolute inset-0 bg-neutral-900">
-        {remoteStream ? (
+        {/* When doctor is screen sharing, show shared screen (local stream) in main area */}
+        {isScreenSharing && isDoctor && localStream ? (
+          <>
+            <video
+              ref={localVideoMainRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-contain"
+            />
+            {/* Audio Level Indicator for shared screen view */}
+            <div className="absolute bottom-24 left-4 bg-black/60 backdrop-blur-sm px-3 py-2 rounded-md">
+              <AudioLevelIndicator level={localAudioLevel} isLocal={true} />
+            </div>
+
+            {/* Drawing Canvas for Doctor - Overlays shared screen */}
+            <DrawingCanvas
+              isActive={isScreenSharing}
+              isDrawingEnabled={isDrawingEnabled}
+              onDrawingMessage={onSendDrawingMessage}
+              remoteDrawingMessages={drawingMessages}
+              onDisableDrawing={() => setIsDrawingEnabled(false)}
+            />
+          </>
+        ) : remoteStream ? (
+          /* Normal view - show remote stream (patient for doctor, doctor for patient) */
           <>
             <video
               ref={remoteVideoRef}
@@ -407,6 +507,16 @@ export const CallInterface = ({
             <div className="absolute bottom-24 left-4 bg-black/60 backdrop-blur-sm px-3 py-2 rounded-md">
               <AudioLevelIndicator level={remoteAudioLevel} isLocal={false} />
             </div>
+
+            {/* Drawing Canvas for Patient - Shows doctor's drawings on received screen share */}
+            {isScreenSharing && !isDoctor && (
+              <DrawingCanvas
+                isActive={isScreenSharing}
+                isDrawingEnabled={false}
+                onDrawingMessage={onSendDrawingMessage}
+                remoteDrawingMessages={drawingMessages}
+              />
+            )}
           </>
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-neutral-800">
@@ -420,9 +530,24 @@ export const CallInterface = ({
         )}
       </div>
 
-      {/* Local Video (Picture-in-Picture) */}
+      {/* Picture-in-Picture - Shows local camera OR remote stream when screen sharing */}
       <div className="absolute top-4 right-4 w-[100px] h-[133px] tablet:w-[140px] tablet:h-[187px] desktop:w-[160px] desktop:h-[213px] bg-neutral-900 rounded-md overflow-hidden shadow-modal border-2 border-white">
-        {localStream ? (
+        {/* When doctor is screen sharing, show remote stream (patient) in PiP */}
+        {isScreenSharing && isDoctor && remoteStream ? (
+          <>
+            <video
+              ref={remoteVideoPipRef}
+              autoPlay
+              playsInline
+              className="w-full h-full object-contain"
+            />
+            {/* Remote Audio Level Indicator */}
+            <div className="absolute bottom-1 left-1 bg-black/60 backdrop-blur-sm px-1.5 py-0.5 rounded-sm">
+              <AudioLevelIndicator level={remoteAudioLevel} isLocal={false} />
+            </div>
+          </>
+        ) : localStream ? (
+          /* Normal view - show local camera in PiP */
           <>
             <video
               ref={localVideoRef}
@@ -466,6 +591,17 @@ export const CallInterface = ({
           <div className="bg-warning/90 backdrop-blur-sm px-2 py-1.5 tablet:px-3 tablet:py-2 rounded-sm flex items-center gap-1.5 tablet:gap-2">
             <Video className="w-3 h-3 tablet:w-4 tablet:h-4 text-white flex-shrink-0" />
             <span className="text-xs tablet:text-small text-white font-medium">TEST MODE</span>
+          </div>
+        )}
+
+        {/* Screen Share Tip - Shows when screen sharing starts */}
+        {showScreenShareTip && isScreenSharing && isDoctor && (
+          <div className="bg-primary-500/95 backdrop-blur-sm px-3 py-2 tablet:px-4 tablet:py-3 rounded-sm flex items-center gap-2 animate-fade-in">
+            <Monitor className="w-4 h-4 tablet:w-5 tablet:h-5 text-white flex-shrink-0" />
+            <div className="flex flex-col min-w-0">
+              <span className="text-xs tablet:text-small text-white font-semibold">Screen Sharing Active</span>
+              <span className="text-xxs tablet:text-xs text-white/90">Your shared screen appears below. Click the pencil to annotate.</span>
+            </div>
           </div>
         )}
       </div>
@@ -591,6 +727,20 @@ export const CallInterface = ({
               <Monitor className="w-6 h-6 text-neutral-900" />
             )}
           </button>
+
+          {/* Drawing/Annotation Toggle - Only visible when screen sharing */}
+          {isScreenSharing && isDoctor && (
+            <button
+              onClick={() => setIsDrawingEnabled(!isDrawingEnabled)}
+              className={`w-12 h-12 tablet:w-14 tablet:h-14 rounded-full flex items-center justify-center transition-all duration-fast
+                ${isDrawingEnabled
+                  ? 'bg-warning hover:bg-warning/90 active:scale-95'
+                  : 'bg-neutral-100 hover:bg-neutral-200 active:scale-95'
+                }`}
+            >
+              <Pencil className={`w-5 h-5 tablet:w-6 tablet:h-6 ${isDrawingEnabled ? 'text-white' : 'text-neutral-900'}`} />
+            </button>
+          )}
 
           {/* End Call */}
           <button

@@ -49,6 +49,8 @@ export const useWebRTC = (roomId: string, userId: string) => {
   const maxReconnectAttempts = 3;
   const remotePeerId = useRef<string | null>(null);
   const disconnectTimeout = useRef<NodeJS.Timeout | null>(null);
+  const dataChannel = useRef<RTCDataChannel | null>(null);
+  const [drawingMessages, setDrawingMessages] = useState<any[]>([]);
 
   // Initialize peer connection with STUN/TURN servers for reliable NAT traversal
   const createPeerConnection = useCallback((): RTCPeerConnection => {
@@ -292,6 +294,51 @@ export const useWebRTC = (roomId: string, userId: string) => {
     pc.onnegotiationneeded = async () => {
       console.log('[useWebRTC] Negotiation needed event fired (but automatic offer disabled)');
       // Don't automatically create offers - wait for "ready" signal exchange
+    };
+
+    // Setup data channel for drawing/cursor sharing
+    const setupDataChannel = (channel: RTCDataChannel) => {
+      console.log('[useWebRTC] Setting up data channel:', channel.label);
+
+      channel.onopen = () => {
+        console.log('[useWebRTC] Data channel opened');
+      };
+
+      channel.onclose = () => {
+        console.log('[useWebRTC] Data channel closed');
+      };
+
+      channel.onerror = (error) => {
+        console.error('[useWebRTC] Data channel error:', error);
+      };
+
+      channel.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          console.log('[useWebRTC] Received drawing message:', message.type);
+          setDrawingMessages((prev) => [...prev, message]);
+        } catch (error) {
+          console.error('[useWebRTC] Failed to parse data channel message:', error);
+        }
+      };
+
+      dataChannel.current = channel;
+    };
+
+    // Create data channel (only the offerer creates it)
+    try {
+      const channel = pc.createDataChannel('drawing', {
+        ordered: true, // Maintain order for drawing strokes
+      });
+      setupDataChannel(channel);
+    } catch (error) {
+      console.warn('[useWebRTC] Failed to create data channel, will receive from peer:', error);
+    }
+
+    // Handle incoming data channel (for the answerer)
+    pc.ondatachannel = (event) => {
+      console.log('[useWebRTC] Received data channel from peer');
+      setupDataChannel(event.channel);
     };
 
     return pc;
@@ -854,6 +901,20 @@ export const useWebRTC = (roomId: string, userId: string) => {
     console.log('[useWebRTC] Peer connection reset complete');
   }, [localStream, createPeerConnection]);
 
+  // Send drawing message via data channel
+  const sendDrawingMessage = useCallback((message: any) => {
+    if (!dataChannel.current || dataChannel.current.readyState !== 'open') {
+      console.warn('[useWebRTC] Data channel not ready, cannot send drawing message');
+      return;
+    }
+
+    try {
+      dataChannel.current.send(JSON.stringify(message));
+    } catch (error) {
+      console.error('[useWebRTC] Failed to send drawing message:', error);
+    }
+  }, []);
+
   // Send location info to remote peer
   const sendLocation = useCallback((locationInfo: LocationInfo) => {
     if (!channel.current) {
@@ -1049,6 +1110,7 @@ export const useWebRTC = (roomId: string, userId: string) => {
     connectionQuality,
     isScreenSharing,
     remoteLocation,
+    drawingMessages,
     startLocalStream,
     createOffer,
     toggleAudio,
@@ -1056,6 +1118,7 @@ export const useWebRTC = (roomId: string, userId: string) => {
     startScreenShare,
     stopScreenShare,
     sendLocation,
+    sendDrawingMessage,
     cleanup,
   };
 };
