@@ -144,13 +144,13 @@ export const requestMediaDevicesMobile = async (): Promise<MediaStream> => {
   }
 
   try {
-    // For mobile devices, we need to be more cautious with constraints
+    // For mobile devices, use lower resolution and framerate for better performance
     const constraints: MediaStreamConstraints = {
       video: browserInfo.isMobile
         ? {
-            width: { ideal: 1280, max: 1920 },
-            height: { ideal: 720, max: 1080 },
-            frameRate: { ideal: 30, max: 30 },
+            width: { ideal: 640, max: 1280 },  // Lower resolution for mobile
+            height: { ideal: 480, max: 720 },
+            frameRate: { ideal: 24, max: 30 }, // Lower framerate for mobile
             facingMode: 'user', // Front camera for mobile
           }
         : {
@@ -162,6 +162,7 @@ export const requestMediaDevicesMobile = async (): Promise<MediaStream> => {
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
+        sampleRate: browserInfo.isMobile ? 16000 : 48000, // Lower sample rate for mobile
       },
     };
 

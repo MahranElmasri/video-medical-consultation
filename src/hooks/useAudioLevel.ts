@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 /**
  * Custom hook to measure audio level from a MediaStream
@@ -19,19 +19,19 @@ export const useAudioLevel = (stream: MediaStream | null): number => {
       return;
     }
 
-    // Skip if same stream
-    if (stream.id === streamIdRef.current) {
-      return;
-    }
-
+    // CRITICAL FIX: Always re-initialize when stream changes
+    // Even if the ID is the same, tracks might have changed (e.g., after screen share)
+    console.log('[useAudioLevel] Initializing audio analyzer for stream:', stream.id);
     streamIdRef.current = stream.id;
 
     const audioTracks = stream.getAudioTracks();
     if (audioTracks.length === 0) {
-      // No audio tracks in stream
+      console.warn('[useAudioLevel] No audio tracks in stream');
       setAudioLevel(0);
       return;
     }
+
+    console.log('[useAudioLevel] Audio tracks found:', audioTracks.length);
 
     try {
       // Create audio context and analyser

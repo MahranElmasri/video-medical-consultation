@@ -63,22 +63,51 @@ export const DrawingCanvas = ({
   // Setup canvas size
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) {
+      console.warn('[DrawingCanvas] Canvas ref not available');
+      return;
+    }
 
     const resizeCanvas = () => {
       const parent = canvas.parentElement;
-      if (!parent) return;
+      if (!parent) {
+        console.warn('[DrawingCanvas] Canvas parent not available');
+        return;
+      }
 
       canvas.width = parent.clientWidth;
       canvas.height = parent.clientHeight;
+      console.log('[DrawingCanvas] Canvas resized:', {
+        width: canvas.width,
+        height: canvas.height,
+        parentWidth: parent.clientWidth,
+        parentHeight: parent.clientHeight,
+        parentTagName: parent.tagName,
+      });
+
+      // Warn if canvas has invalid dimensions
+      if (canvas.width === 0 || canvas.height === 0) {
+        console.error('[DrawingCanvas] Canvas has zero dimensions!', {
+          canvasWidth: canvas.width,
+          canvasHeight: canvas.height,
+          parentWidth: parent.clientWidth,
+          parentHeight: parent.clientHeight,
+          parentDisplay: window.getComputedStyle(parent).display,
+          parentPosition: window.getComputedStyle(parent).position,
+        });
+      }
+
       redrawCanvas();
     };
 
+    // Initial resize with delay to ensure parent is rendered
+    setTimeout(resizeCanvas, 100);
     resizeCanvas();
+
     window.addEventListener('resize', resizeCanvas);
 
     return () => window.removeEventListener('resize', resizeCanvas);
-  }, [redrawCanvas]);
+  }, [redrawCanvas, isActive]);
 
   // Throttled cursor position sender (defined before handlePointerMove to avoid dependency issues)
   const throttledSendCursorRef = useRef<((point: Point) => void) | null>(null);
@@ -102,6 +131,12 @@ export const DrawingCanvas = ({
 
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    console.log('[DrawingCanvas] Pointer down - starting stroke', {
+      canvasWidth: canvas.width,
+      canvasHeight: canvas.height,
+      isDrawingEnabled,
+    });
 
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -308,7 +343,11 @@ export const DrawingCanvas = ({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
-        style={{ touchAction: 'none' }}
+        style={{
+          touchAction: 'none',
+          // Ensure canvas is visible during debugging
+          border: isDrawingEnabled ? '2px solid rgba(255,0,0,0.3)' : 'none'
+        }}
       />
 
       {/* Remote Cursor */}

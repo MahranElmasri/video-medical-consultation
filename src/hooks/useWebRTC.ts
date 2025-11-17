@@ -51,6 +51,7 @@ export const useWebRTC = (roomId: string, userId: string) => {
   const disconnectTimeout = useRef<NodeJS.Timeout | null>(null);
   const dataChannel = useRef<RTCDataChannel | null>(null);
   const [drawingMessages, setDrawingMessages] = useState<any[]>([]);
+  const stopScreenShareRef = useRef<(() => Promise<void>) | null>(null);
 
   // Initialize peer connection with STUN/TURN servers for reliable NAT traversal
   const createPeerConnection = useCallback((): RTCPeerConnection => {
@@ -201,10 +202,12 @@ export const useWebRTC = (roomId: string, userId: string) => {
         muted: event.track.muted,
       });
 
-      // Prevent duplicate track processing
-      if (receivedTracks.current.has(event.track.id)) {
-        console.log('[useWebRTC] Track already processed, skipping:', event.track.id);
-        return;
+      // CRITICAL FIX: When replaceTrack() is called, we might receive the SAME track ID again
+      // but we need to process it to update the stream. Check if this is a replacement.
+      const isReplacement = receivedTracks.current.has(event.track.id);
+      if (isReplacement) {
+        console.log('[useWebRTC] ⚠️ Track already processed, but processing again (might be replaceTrack):', event.track.id);
+        // Don't return - process it anyway to ensure stream is updated
       }
       receivedTracks.current.add(event.track.id);
 
@@ -218,9 +221,39 @@ export const useWebRTC = (roomId: string, userId: string) => {
           audioTracks: stream.getAudioTracks().length,
         });
 
-        // Store reference and update state
-        remoteStreamRef.current = stream;
-        setRemoteStream(stream);
+        // CRITICAL FIX for replaceTrack: If we already have a remote stream, check if this is a track replacement
+        if (remoteStreamRef.current && remoteStreamRef.current.id === stream.id) {
+          console.log('[useWebRTC] ⚠️ Same stream detected - this might be a replaceTrack scenario');
+
+          // Remove any ended tracks from our current stream
+          remoteStreamRef.current.getTracks().forEach(track => {
+            if (track.readyState === 'ended') {
+              console.log('[useWebRTC] Removing ended track:', track.kind, track.id);
+              remoteStreamRef.current!.removeTrack(track);
+            }
+          });
+
+          // Add the new track if it's not already in the stream
+          const existingTrack = remoteStreamRef.current.getTracks().find(t => t.id === event.track.id);
+          if (!existingTrack && event.track.readyState === 'live') {
+            console.log('[useWebRTC] Adding new replacement track to stream:', event.track.kind);
+            remoteStreamRef.current.addTrack(event.track);
+          }
+
+          // Force state update with a NEW stream object to trigger React re-render
+          const newStream = new MediaStream(remoteStreamRef.current.getTracks());
+          console.log('[useWebRTC] Created new stream object with tracks:', {
+            videoTracks: newStream.getVideoTracks().length,
+            audioTracks: newStream.getAudioTracks().length,
+          });
+          remoteStreamRef.current = newStream;
+          setRemoteStream(newStream);
+        } else {
+          // First time receiving this stream
+          console.log('[useWebRTC] New stream detected, setting as remote stream');
+          remoteStreamRef.current = stream;
+          setRemoteStream(stream);
+        }
       } else {
         console.log('[useWebRTC] No stream in event, building stream from tracks');
 
@@ -248,8 +281,27 @@ export const useWebRTC = (roomId: string, userId: string) => {
 
       // Monitor track lifecycle
       event.track.onended = () => {
-        console.warn('[useWebRTC] Remote track ended:', event.track.kind);
+        console.warn('[useWebRTC] === REMOTE TRACK ENDED ===', event.track.kind);
+        console.warn('[useWebRTC] This usually happens when sender replaces track (e.g., screen share stop)');
         receivedTracks.current.delete(event.track.id);
+
+        // CRITICAL FIX: When a track ends (e.g., screen share stops), we need to get the new track
+        // The new track should arrive via another ontrack event, but we need to handle the stream update
+        if (remoteStreamRef.current) {
+          console.warn('[useWebRTC] Removing ended track from remote stream');
+          remoteStreamRef.current.removeTrack(event.track);
+
+          // Force a state update to trigger React re-render
+          // Create a new MediaStream with the remaining tracks to ensure React detects the change
+          const remainingTracks = remoteStreamRef.current.getTracks();
+          console.warn('[useWebRTC] Remaining tracks after removal:', remainingTracks.length);
+
+          if (remainingTracks.length > 0) {
+            const newStream = new MediaStream(remainingTracks);
+            remoteStreamRef.current = newStream;
+            setRemoteStream(newStream);
+          }
+        }
       };
 
       event.track.onmute = () => {
@@ -687,10 +739,19 @@ export const useWebRTC = (roomId: string, userId: string) => {
     }
 
     try {
+      // Check if getDisplayMedia is supported
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+        console.error('[useWebRTC] Screen sharing not supported in this browser');
+        alert('Screen sharing is not supported in your browser. Please use Chrome, Edge, or Firefox on desktop.');
+        return false;
+      }
+
       // Request display media
       console.log('[useWebRTC] Requesting display media...');
       const displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
+        video: {
+          displaySurface: 'monitor', // Prefer full screen over window
+        },
         audio: false,
       });
 
@@ -699,9 +760,9 @@ export const useWebRTC = (roomId: string, userId: string) => {
         console.error('[useWebRTC] No screen track obtained');
         return false;
       }
-      
+
       console.log('[useWebRTC] Screen track obtained:', screenTrack.label);
-      
+
       // Find the video sender and replace track
       const videoSender = peerConnection.current.getSenders().find(s => s.track?.kind === 'video');
       if (!videoSender) {
@@ -709,11 +770,11 @@ export const useWebRTC = (roomId: string, userId: string) => {
         displayStream.getTracks().forEach(track => track.stop());
         return false;
       }
-      
+
       // Replace the track in peer connection
       await videoSender.replaceTrack(screenTrack);
       console.log('[useWebRTC] Screen track replaced in peer connection');
-      
+
       // CRITICAL FIX: Update local stream to show screen share
       const audioTrack = localStream?.getAudioTracks()[0];
       const newLocalStream = new MediaStream();
@@ -722,31 +783,64 @@ export const useWebRTC = (roomId: string, userId: string) => {
         newLocalStream.addTrack(audioTrack);
       }
       setLocalStream(newLocalStream);
-      
+
       // Store screen stream
       screenStream.current = displayStream;
       setIsScreenSharing(true);
 
-      // Handle user stopping screen share via browser UI
-      screenTrack.onended = () => {
-        console.log('[useWebRTC] Screen share ended by user');
-        stopScreenShare();
+      // CRITICAL FIX: Handle user stopping screen share via browser UI "Stop Sharing" button
+      screenTrack.onended = async () => {
+        console.log('[useWebRTC] ⚠️ Screen share ended by browser UI (Stop Sharing button clicked)');
+        console.log('[useWebRTC] Calling stopScreenShare to restore camera...');
+
+        // IMPORTANT: Must call stopScreenShare to properly restore camera track
+        // Just setting setIsScreenSharing(false) is NOT enough - we need to replaceTrack!
+        if (stopScreenShareRef.current) {
+          await stopScreenShareRef.current();
+        } else {
+          console.error('[useWebRTC] stopScreenShare ref not available!');
+          setIsScreenSharing(false);
+        }
+
+        console.log('[useWebRTC] Camera restored after browser UI stop');
       };
 
       console.log('[useWebRTC] Screen sharing started successfully');
       return true;
-    } catch (error) {
-      console.error('[useWebRTC] Error starting screen share:', error);
-      return false;
+    } catch (error: any) {
+      // Handle specific error types
+      if (error.name === 'NotAllowedError') {
+        console.warn('[useWebRTC] Screen share permission denied by user');
+        // User canceled or denied permission - this is normal, don't show error
+        return false;
+      } else if (error.name === 'NotSupportedError') {
+        console.error('[useWebRTC] Screen sharing not supported');
+        alert('Screen sharing is not supported on this device. Please use a desktop browser.');
+        return false;
+      } else if (error.name === 'NotFoundError') {
+        console.error('[useWebRTC] No screen available to share');
+        alert('No screen available to share. Please try again.');
+        return false;
+      } else {
+        console.error('[useWebRTC] Error starting screen share:', error);
+        alert('Failed to start screen sharing. Please try again.');
+        return false;
+      }
     }
   }, [localStream]);
 
   // Stop screen sharing and restore camera - CRITICAL FIX
   const stopScreenShare = useCallback(async () => {
     console.log('[useWebRTC] === STOPPING SCREEN SHARE ===');
-    
-    if (!peerConnection.current || !cameraStream.current) {
-      console.log('[useWebRTC] Cannot stop screen share: missing resources');
+
+    if (!peerConnection.current) {
+      console.log('[useWebRTC] Cannot stop screen share: no peer connection');
+      return;
+    }
+
+    // Prevent recursive calls when stopScreenShare is called from screenTrack.onended
+    if (!screenStream.current && !isScreenSharing) {
+      console.log('[useWebRTC] Screen share already stopped, skipping');
       return;
     }
 
@@ -757,18 +851,48 @@ export const useWebRTC = (roomId: string, userId: string) => {
           track.stop();
           console.log('[useWebRTC] Stopped screen track:', track.kind);
         });
+        screenStream.current = null;
       }
-      
+
+      // Check if camera stream is still valid
+      if (!cameraStream.current) {
+        console.warn('[useWebRTC] Camera stream lost, requesting new stream');
+        try {
+          const newStream = await startLocalStream();
+          cameraStream.current = newStream;
+          setLocalStream(newStream);
+          setIsScreenSharing(false);
+          return;
+        } catch (error) {
+          console.error('[useWebRTC] Failed to restart camera stream:', error);
+          setIsScreenSharing(false);
+          return;
+        }
+      }
+
       // Get the camera video track
       const cameraVideoTrack = cameraStream.current.getVideoTracks()[0];
       if (!cameraVideoTrack) {
-        console.error('[useWebRTC] No camera video track found');
+        console.error('[useWebRTC] No camera video track found in camera stream');
+        setIsScreenSharing(false);
         return;
       }
-      
+
+      // Verify camera track is active
+      if (cameraVideoTrack.readyState === 'ended') {
+        console.error('[useWebRTC] Camera track ended, cannot restore');
+        setIsScreenSharing(false);
+        return;
+      }
+
       // Ensure camera track is enabled
       cameraVideoTrack.enabled = true;
-      
+      console.log('[useWebRTC] Camera track state:', {
+        enabled: cameraVideoTrack.enabled,
+        readyState: cameraVideoTrack.readyState,
+        label: cameraVideoTrack.label,
+      });
+
       // Find the video sender and replace track back to camera
       const videoSender = peerConnection.current.getSenders().find(s => s.track?.kind === 'video');
       if (videoSender) {
@@ -778,15 +902,19 @@ export const useWebRTC = (roomId: string, userId: string) => {
 
       // CRITICAL FIX: Restore local stream to camera
       setLocalStream(cameraStream.current);
-      
-      screenStream.current = null;
       setIsScreenSharing(false);
-      
+
       console.log('[useWebRTC] Screen sharing stopped, camera restored');
     } catch (error) {
       console.error('[useWebRTC] Error stopping screen share:', error);
+      setIsScreenSharing(false);
     }
-  }, []);
+  }, [startLocalStream, isScreenSharing]);
+
+  // Store stopScreenShare in ref so startScreenShare can call it
+  useEffect(() => {
+    stopScreenShareRef.current = stopScreenShare;
+  }, [stopScreenShare]);
 
   // Monitor connection quality using getStats
   const monitorConnectionQuality = useCallback(async () => {

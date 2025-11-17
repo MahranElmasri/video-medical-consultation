@@ -48,6 +48,7 @@ export const CallInterface = ({
   const [showEndCallConfirm, setShowEndCallConfirm] = useState(false);
   const [isDrawingEnabled, setIsDrawingEnabled] = useState(false);
   const [showScreenShareTip, setShowScreenShareTip] = useState(false);
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -212,20 +213,43 @@ export const CallInterface = ({
       })),
     });
 
-    // CRITICAL FIX: Verify remote tracks are enabled
+    // CRITICAL FIX: Verify remote tracks are enabled and remove any ended tracks
     const videoTracks = remoteStream.getVideoTracks();
+    let hasValidTrack = false;
     videoTracks.forEach((track, idx) => {
       console.log(`[CallInterface] Remote video track ${idx} state:`, {
         enabled: track.enabled,
         readyState: track.readyState,
         muted: track.muted,
       });
+
+      // Check if track is valid
+      if (track.readyState === 'live' && track.enabled) {
+        hasValidTrack = true;
+      } else if (track.readyState === 'ended') {
+        console.warn('[CallInterface] ⚠️ Found ENDED track in remote stream - this should not happen!');
+        // This is a sign that track replacement happened but stream wasn't updated properly
+      }
     });
+
+    if (!hasValidTrack) {
+      console.error('[CallInterface] ❌ No valid live tracks in remote stream!');
+      return;
+    }
 
     // Set video element properties for better playback
     videoElement.playsInline = true;
     videoElement.autoplay = true;
     videoElement.muted = false; // Remote video should have audio
+
+    // MOBILE FIX: Set additional properties for better mobile performance
+    videoElement.setAttribute('playsinline', 'true'); // iOS requires this attribute
+    videoElement.setAttribute('webkit-playsinline', 'true'); // Older iOS
+
+    // MOBILE FIX: Disable picture-in-picture to prevent freezing
+    if ('disablePictureInPicture' in videoElement) {
+      (videoElement as any).disablePictureInPicture = true;
+    }
 
     // Set srcObject
     videoElement.srcObject = remoteStream;
@@ -247,8 +271,16 @@ export const CallInterface = ({
         console.log(`[CallInterface] Attempting remote video play (attempt ${retryCount + 1}/${maxRetries})`);
         await videoElement.play();
         console.log('[CallInterface] Remote video playing successfully');
-      } catch (error) {
+        setAudioUnlocked(true); // Audio playback succeeded
+      } catch (error: any) {
         console.warn(`[CallInterface] Remote play attempt ${retryCount + 1} failed:`, error);
+
+        // Handle autoplay policy errors
+        if (error.name === 'NotAllowedError') {
+          console.warn('[CallInterface] Autoplay blocked - waiting for user interaction');
+          setAudioUnlocked(false);
+        }
+
         retryCount++;
 
         if (retryCount < maxRetries) {
@@ -268,13 +300,31 @@ export const CallInterface = ({
 
     // Monitor for track additions (for late-arriving tracks)
     const handleTrackAdded = () => {
-      console.log('[CallInterface] New track added to remote stream, reattaching...');
-      if (videoElement.srcObject !== remoteStream) {
+      console.log('[CallInterface] ⚠️ New track added to remote stream, forcing reattach...');
+      // Force complete reattachment to ensure new track is used
+      videoElement.srcObject = null;
+      setTimeout(() => {
         videoElement.srcObject = remoteStream;
-      }
+        videoElement.load();
+        videoElement.play().catch(e => console.warn('[CallInterface] Play after track add failed:', e));
+      }, 50);
+    };
+
+    // CRITICAL FIX: Monitor for track removals (happens during replaceTrack)
+    const handleTrackRemoved = (event: MediaStreamTrackEvent) => {
+      console.warn('[CallInterface] ⚠️ Track removed from remote stream:', event.track.kind);
+      console.warn('[CallInterface] This indicates a replaceTrack operation');
+      // The new track should be added via handleTrackAdded, but force a refresh just in case
+      setTimeout(() => {
+        if (videoElement.srcObject === remoteStream) {
+          console.log('[CallInterface] Forcing video element refresh after track removal');
+          videoElement.load();
+        }
+      }, 100);
     };
 
     remoteStream.addEventListener('addtrack', handleTrackAdded);
+    remoteStream.addEventListener('removetrack', handleTrackRemoved);
     videoElement.addEventListener('loadedmetadata', handleMetadataLoaded);
 
     // Handle video errors
@@ -288,7 +338,33 @@ export const CallInterface = ({
       }, 500);
     };
 
+    // MOBILE FIX: Detect and recover from video stalls/freezes
+    const handleStalled = () => {
+      console.warn('[CallInterface] Remote video stalled - attempting recovery');
+      videoElement.load();
+      setTimeout(() => {
+        attemptPlay();
+      }, 100);
+    };
+
+    const handleSuspend = () => {
+      console.warn('[CallInterface] Remote video suspended - attempting recovery');
+      setTimeout(() => {
+        if (videoElement.paused) {
+          attemptPlay();
+        }
+      }, 200);
+    };
+
+    const handleWaiting = () => {
+      console.warn('[CallInterface] Remote video waiting for data...');
+      // Video is buffering - this is normal but log it
+    };
+
     videoElement.addEventListener('error', handleError);
+    videoElement.addEventListener('stalled', handleStalled);
+    videoElement.addEventListener('suspend', handleSuspend);
+    videoElement.addEventListener('waiting', handleWaiting);
 
     // Try immediate play if metadata already loaded
     if (videoElement.readyState >= videoElement.HAVE_METADATA) {
@@ -309,8 +385,12 @@ export const CallInterface = ({
     return () => {
       console.log('[CallInterface] Cleaning up remote video');
       remoteStream.removeEventListener('addtrack', handleTrackAdded);
+      remoteStream.removeEventListener('removetrack', handleTrackRemoved);
       videoElement.removeEventListener('loadedmetadata', handleMetadataLoaded);
       videoElement.removeEventListener('error', handleError);
+      videoElement.removeEventListener('stalled', handleStalled);
+      videoElement.removeEventListener('suspend', handleSuspend);
+      videoElement.removeEventListener('waiting', handleWaiting);
       if (videoElement) {
         videoElement.srcObject = null;
       }
@@ -374,7 +454,7 @@ export const CallInterface = ({
     };
   }, [localStream]);
 
-  // Auto-hide controls after inactivity
+  // Auto-hide controls after inactivity AND unlock audio on user interaction
   useEffect(() => {
     const resetTimeout = () => {
       if (controlsTimeoutRef.current) {
@@ -386,8 +466,19 @@ export const CallInterface = ({
       }, 3000);
     };
 
-    const handleActivity = () => resetTimeout();
-    
+    const handleActivity = () => {
+      resetTimeout();
+
+      // CRITICAL FIX: Unlock audio playback on first user interaction
+      if (!audioUnlocked && remoteVideoRef.current) {
+        console.log('[CallInterface] User interaction detected - attempting to unlock audio');
+        remoteVideoRef.current.play().catch(e => {
+          console.warn('[CallInterface] Audio unlock failed:', e);
+        });
+        setAudioUnlocked(true);
+      }
+    };
+
     window.addEventListener('mousemove', handleActivity);
     window.addEventListener('touchstart', handleActivity);
     window.addEventListener('click', handleActivity);
@@ -402,7 +493,7 @@ export const CallInterface = ({
         clearTimeout(controlsTimeoutRef.current);
       }
     };
-  }, []);
+  }, [audioUnlocked]);
 
   const handleToggleAudio = () => {
     const enabled = onToggleAudio();
@@ -418,6 +509,69 @@ export const CallInterface = ({
     if (isScreenSharing) {
       onStopScreenShare();
       setShowScreenShareTip(false);
+
+      // CRITICAL FIX: Force video elements to completely reattach streams
+      // After screen share stops, the track changes but the stream object stays the same
+      // This causes React not to re-render, leading to 0x0 dimensions
+      setTimeout(() => {
+        console.log('[CallInterface] === FORCE REATTACHING ALL VIDEOS AFTER SCREEN SHARE STOP ===');
+
+        // Force remote video reattachment
+        if (remoteVideoRef.current && remoteStream) {
+          const remoteVideoElement = remoteVideoRef.current;
+          console.log('[CallInterface] Reattaching remote video');
+          console.log('[CallInterface] Remote stream tracks:', remoteStream.getVideoTracks().map(t => ({
+            id: t.id,
+            label: t.label,
+            enabled: t.enabled,
+            readyState: t.readyState,
+          })));
+
+          // Clear first
+          remoteVideoElement.srcObject = null;
+
+          // Small delay then reattach
+          setTimeout(() => {
+            remoteVideoElement.srcObject = remoteStream;
+            remoteVideoElement.load(); // Force reload
+            remoteVideoElement.play().catch(e => {
+              console.error('[CallInterface] Remote video play failed:', e);
+              // Retry after another delay
+              setTimeout(() => {
+                remoteVideoElement.play().catch(err => console.error('[CallInterface] Remote video retry failed:', err));
+              }, 200);
+            });
+          }, 50);
+        }
+
+        // Force local video reattachment
+        if (localVideoRef.current && localStream) {
+          const localVideoElement = localVideoRef.current;
+          console.log('[CallInterface] Reattaching local video');
+          console.log('[CallInterface] Local stream tracks:', localStream.getVideoTracks().map(t => ({
+            id: t.id,
+            label: t.label,
+            enabled: t.enabled,
+            readyState: t.readyState,
+          })));
+
+          // Clear first
+          localVideoElement.srcObject = null;
+
+          // Small delay then reattach
+          setTimeout(() => {
+            localVideoElement.srcObject = localStream;
+            localVideoElement.load(); // Force reload
+            localVideoElement.play().catch(e => {
+              console.error('[CallInterface] Local video play failed:', e);
+              // Retry after another delay
+              setTimeout(() => {
+                localVideoElement.play().catch(err => console.error('[CallInterface] Local video retry failed:', err));
+              }, 200);
+            });
+          }, 50);
+        }
+      }, 100);
     } else {
       const success = await onStartScreenShare();
 
@@ -475,6 +629,7 @@ export const CallInterface = ({
           <>
             <video
               ref={localVideoMainRef}
+              key={`local-screen-${localStream.id}`}
               autoPlay
               playsInline
               muted
@@ -499,6 +654,7 @@ export const CallInterface = ({
           <>
             <video
               ref={remoteVideoRef}
+              key={`remote-video-${remoteStream.id}`}
               autoPlay
               playsInline
               className="w-full h-full object-contain"
@@ -537,6 +693,7 @@ export const CallInterface = ({
           <>
             <video
               ref={remoteVideoPipRef}
+              key={`remote-pip-${remoteStream.id}`}
               autoPlay
               playsInline
               className="w-full h-full object-contain"
@@ -551,6 +708,7 @@ export const CallInterface = ({
           <>
             <video
               ref={localVideoRef}
+              key={`local-camera-${localStream.id}`}
               autoPlay
               playsInline
               muted
