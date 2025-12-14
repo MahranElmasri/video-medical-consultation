@@ -6,7 +6,7 @@ import sourceIdentifierPlugin from 'vite-plugin-source-identifier'
 const isProd = process.env.BUILD_MODE === 'prod'
 export default defineConfig({
   plugins: [
-    react(), 
+    react(),
     sourceIdentifierPlugin({
       enabled: !isProd,
       attributePrefix: 'data-matrix',
@@ -16,6 +16,14 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+    },
+  },
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
     },
   },
 })

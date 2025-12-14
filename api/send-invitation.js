@@ -3,16 +3,9 @@
  * Uses Nodemailer with IONOS SMTP
  */
 
-const nodemailer = require('nodemailer');
+import nodemailer from 'nodemailer';
 
-// CORS headers for allowing frontend requests
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-};
-
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   // Set CORS headers for all responses
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -343,7 +336,4 @@ MVZ El-Sharafi
       details: process.env.NODE_ENV === 'development' ? error.stack : undefined,
     });
   }
-};
-
-// Export for Vercel serverless
-module.exports.default = module.exports;
+}

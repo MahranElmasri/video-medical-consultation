@@ -2,7 +2,7 @@
  * Simple test endpoint to verify API is working
  */
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/json');
 
@@ -17,6 +17,4 @@ module.exports = async (req, res) => {
       smtpUser: process.env.SMTP_USER || 'Not set',
     }
   });
-};
-
-module.exports.default = module.exports;
+}
