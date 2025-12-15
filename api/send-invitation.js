@@ -281,16 +281,17 @@ Sichere medizinische Videosprechstunde
 MVZ El-Sharafi
     `;
 
-    // Send email using Resend
+    // Send email using Resend with verified domain
     const data = await resend.emails.send({
-      from: 'MVZ El-Sharafi <onboarding@resend.dev>', // Use verified domain in production
+      from: 'MVZ El-Sharafi <send@mvz-elsharafi.de>',
       to: [email],
       subject: 'Ihre Einladung zur Videosprechstunde',
       html: htmlContent,
       text: textContent,
     });
 
-    console.log('Email sent successfully:', data.id);
+    console.log('Email sent successfully:', data);
+    console.log('Message ID:', data.id);
 
     // Return success response
     return res.status(200).json({
