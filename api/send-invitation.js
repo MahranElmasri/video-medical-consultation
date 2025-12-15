@@ -1,9 +1,9 @@
 /**
  * Vercel Serverless Function for sending consultation invitation emails
- * Uses Nodemailer with IONOS SMTP
+ * Uses Resend API (compatible with Vercel serverless restrictions)
  */
 
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
 export default async function handler(req, res) {
   // Set CORS headers for all responses
@@ -44,42 +44,19 @@ export default async function handler(req, res) {
       });
     }
 
-    // Get SMTP configuration from environment variables
-    const smtpHost = process.env.SMTP_HOST;
-    const smtpUser = process.env.SMTP_USER;
-    const smtpPass = process.env.SMTP_PASS;
+    // Get Resend API key from environment variables
+    const resendApiKey = process.env.RESEND_API_KEY;
 
-    if (!smtpHost || !smtpUser || !smtpPass) {
-      console.error('Missing SMTP configuration in environment variables');
+    if (!resendApiKey) {
+      console.error('Missing RESEND_API_KEY in environment variables');
       return res.status(500).json({
         error: 'Email service not configured',
-        message: 'SMTP settings are missing. Please contact administrator.'
+        message: 'Email API key is missing. Please contact administrator.'
       });
     }
 
-    // Create Nodemailer transporter with IONOS SMTP
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: 587, // IONOS uses port 587 for TLS
-      secure: false, // Use STARTTLS
-      auth: {
-        user: smtpUser,
-        pass: smtpPass,
-      },
-      tls: {
-        ciphers: 'SSLv3',
-        rejectUnauthorized: false, // For compatibility with some SMTP servers
-      },
-    });
-
-    // Verify SMTP connection
-    try {
-      await transporter.verify();
-      console.log('SMTP connection verified successfully');
-    } catch (verifyError) {
-      console.error('SMTP verification failed:', verifyError);
-      throw new Error('Email service connection failed');
-    }
+    // Initialize Resend
+    const resend = new Resend(resendApiKey);
 
     // HTML email template
     const htmlContent = `
@@ -304,25 +281,22 @@ Sichere medizinische Videosprechstunde
 MVZ El-Sharafi
     `;
 
-    // Email options
-    const mailOptions = {
-      from: `"MVZ El-Sharafi Videosprechstunde" <${smtpUser}>`,
-      to: email,
+    // Send email using Resend
+    const data = await resend.emails.send({
+      from: 'MVZ El-Sharafi <onboarding@resend.dev>', // Use verified domain in production
+      to: [email],
       subject: 'Ihre Einladung zur Videosprechstunde',
-      text: textContent,
       html: htmlContent,
-    };
+      text: textContent,
+    });
 
-    // Send email
-    const info = await transporter.sendMail(mailOptions);
-
-    console.log('Email sent successfully:', info.messageId);
+    console.log('Email sent successfully:', data.id);
 
     // Return success response
     return res.status(200).json({
       success: true,
       message: 'Invitation email sent successfully',
-      messageId: info.messageId,
+      messageId: data.id,
     });
 
   } catch (error) {
