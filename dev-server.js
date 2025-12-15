@@ -9,8 +9,8 @@ import dotenv from 'dotenv';
 import sendInvitation from './api/send-invitation.js';
 import testApi from './api/test.js';
 
-// Load environment variables
-dotenv.config({ path: '.env' });
+// Load environment variables from .env file
+dotenv.config();
 
 const app = express();
 const PORT = 3001;
@@ -49,5 +49,5 @@ app.get('/api/test', createMockVercelHandler(testApi));
 // Start server
 app.listen(PORT, () => {
   console.log(`✓ Dev API server running on http://localhost:${PORT}`);
-  console.log(`✓ Environment variables loaded: ${process.env.SMTP_HOST ? 'Yes' : 'No'}`);
+  console.log(`✓ Environment variables loaded: ${process.env.RESEND_API_KEY ? 'Yes' : 'No'}`);
 });
