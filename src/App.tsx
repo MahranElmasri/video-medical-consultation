@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { LandingPage } from './components/LandingPage';
 import { WaitingRoom } from './components/WaitingRoom';
 import { CallInterface } from './components/CallInterface';
+import { CallEnded } from './components/CallEnded';
 import { useWebRTC } from './hooks/useWebRTC';
 import { supabase } from './lib/supabase';
 import { detectBrowser, getBrowserInstructions } from './utils/permissionCheck';
@@ -9,7 +10,7 @@ import { getUserLocation } from './utils/geolocation';
 import { getBrowserInfo, getMobilePermissionHelp } from './utils/browserCompatibility';
 import './index.css';
 
-type AppState = 'landing' | 'waiting' | 'call';
+type AppState = 'landing' | 'waiting' | 'call' | 'callEnded';
 
 interface RoomData {
   roomId: string;
@@ -145,8 +146,7 @@ function App() {
   // Handle end call
   const handleEndCall = () => {
     cleanup();
-    setRoomData(null);
-    setAppState('landing');
+    setAppState('callEnded');
   };
 
   // Check for room ID in URL (for patients joining via shared link)
@@ -211,6 +211,10 @@ function App() {
           onSendDrawingMessage={sendDrawingMessage}
           onEndCall={handleEndCall}
         />
+      )}
+
+      {appState === 'callEnded' && (
+        <CallEnded isDoctor={!!roomData?.token} />
       )}
 
       {/* Permission Error Modal */}
